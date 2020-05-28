@@ -498,7 +498,6 @@ def compile_DescribeStmt(
                 modules.append(objref.name)
             else:
                 itemtype: Optional[Type[s_obj.Object]] = None
-                found = False
 
                 name: str
                 if objref.module:
@@ -512,30 +511,50 @@ def compile_DescribeStmt(
                             itemclass)
                     )
 
-                if (itemclass is None or
-                        itemclass is qltypes.SchemaObjectClass.FUNCTION):
+                last_exc = None
+                # Search in the current namespace AND in std.
+                for aliases in [ictx.modaliases, {}]:
+                    # Use the specific modaliases instead of the
+                    # context ones.
+                    ictx.modaliases = cast(Dict[Optional[str], str], aliases)
 
-                    try:
-                        funcs: Tuple[s_func.Function, ...] = (
-                            ictx.env.schema.get_functions(
-                                name,
-                                module_aliases=ictx.modaliases)
-                        )
-                    except errors.InvalidReferenceError:
-                        pass
-                    else:
-                        for func in funcs:
-                            items.append(func.get_name(ictx.env.schema))
-                        found = True
+                    # We need to check functions if we're looking for them
+                    # specifically or if this is a broad search. They are
+                    # handled separately because they allow multiple
+                    # matches for the same name.
+                    if (itemclass is None or
+                            itemclass is qltypes.SchemaObjectClass.FUNCTION):
+                        try:
+                            funcs: Tuple[s_func.Function, ...] = (
+                                ictx.env.schema.get_functions(
+                                    name,
+                                    module_aliases=ictx.modaliases)
+                            )
+                        except errors.InvalidReferenceError:
+                            pass
+                        else:
+                            for func in funcs:
+                                items.append(func.get_name(ictx.env.schema))
 
-                if not found:
-                    obj = schemactx.get_schema_object(
-                        objref,
-                        item_type=itemtype,
-                        ctx=ictx,
-                    )
+                    # Also find an object matching the name as long as
+                    # it's not a function we're looking for specifically.
+                    if itemclass is not qltypes.SchemaObjectClass.FUNCTION:
+                        try:
+                            obj = schemactx.get_schema_object(
+                                objref,
+                                item_type=itemtype,
+                                ctx=ictx,
+                            )
+                            items.append(obj.get_name(ictx.env.schema))
+                        except errors.InvalidReferenceError as exc:
+                            # Record the exception to be possibly
+                            # raised if no matches are found
+                            last_exc = exc
 
-                    items.append(obj.get_name(ictx.env.schema))
+            # If we already have some results, suppress the exception,
+            # otherwise raise the recorded exception.
+            if not items and last_exc:
+                raise last_exc
 
             verbose = ql.options.get_flag('VERBOSE')
 

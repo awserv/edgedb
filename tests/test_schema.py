@@ -4659,3 +4659,41 @@ class TestDescribe(tb.BaseSchemaLoadTest):
             r"function test::foo() ->  std::str "
             r"using (SELECT r'\1');"
         )
+
+    def test_describe_poly_01(self):
+        self._assert_describe(
+            """
+            scalar type all extending str;
+
+            function all() -> bool {
+                using (
+                    SELECT true
+                );
+            }
+            """,
+
+            'DESCRIBE OBJECT all AS TEXT',
+
+            [
+                """
+                function test::all() -> std::bool using (SELECT
+                    true
+                );
+                function std::all(vals: SET OF std::bool) ->  std::bool {
+                    volatility := 'IMMUTABLE';
+                    using sql
+                ;};
+                scalar type test::all extending std::str;
+                """,
+                """
+                function std::all(vals: SET OF std::bool) ->  std::bool {
+                    volatility := 'IMMUTABLE';
+                    using sql
+                ;};
+                function test::all() -> std::bool using (SELECT
+                    true
+                );
+                scalar type test::all extending std::str;
+                """,
+            ],
+        )
